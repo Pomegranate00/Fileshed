@@ -464,6 +464,8 @@ shed_patch_text(zone="storage", path="projects/2024/.keep", content="")
 | `max_output_default` | 50000 | Default output truncation (~50KB) |
 | `max_output_absolute` | 5000000 | Absolute max output (~5MB) |
 | `sqlite_readonly` | `false` | Restrict SQLite to SELECT only |
+| `latex_escape_autocorrect` | `false` | Automatically correct doubled backslashes in LaTeX commands in .md files |
+| `latex_escape_extra_commands` | `""` | Comma-separated list of additional LaTeX commands to whitelist |
 
 ---
 
