@@ -4002,6 +4002,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         pattern: str,
         regex_flags: str,
         match_all: bool,
+        literal: bool,
         overwrite: bool,
         safe: bool,
         group: str,
@@ -4126,6 +4127,8 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         if pattern is not None and not overwrite:
             if pattern == "":
                 raise StorageError("INVALID_PARAMETER", "Pattern cannot be empty")
+            if literal:
+                pattern = re.escape(pattern)
             # LLM Guardrail: validate regex_flags type
             if not isinstance(regex_flags, str):
                 raise StorageError(
@@ -4298,10 +4301,9 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                         raise StorageError("PATTERN_NOT_FOUND", f"Pattern not found: {pattern}")
 
                     # Count replacements and perform substitution
-                    if match_all:
-                        new_content, match_count = compiled_pattern.subn(content, full_content)
-                    else:
-                        new_content, match_count = compiled_pattern.subn(content, full_content, count=1)
+                    repl = (lambda m: content) if literal else content
+                    count_limit = 0 if match_all else 1
+                    new_content, match_count = compiled_pattern.subn(repl, full_content, count=count_limit)
 
                     lines_affected = match_count
                     # Split back into lines, preserving line structure
@@ -5105,6 +5107,7 @@ class Tools:
         pattern: str = None,
         regex_flags: str = "",
         match_all: bool = False,
+        literal: bool = False,
         overwrite: bool = False,
         safe: bool = True,
         group: str = None,
@@ -5116,6 +5119,10 @@ class Tools:
     ) -> str:
         """
         Edit a text file in the specified zone.
+
+        💡 STRONGLY RECOMMENDED: Use literal=True for simple string matches to avoid issues with regex special characters.
+        Only use regular expressions (literal=False) when complex matching is specifically needed.
+        Example: shed_patch_text(zone="storage", path="file.txt", content="New Value", pattern="Old Value", position="replace", literal=True)
 
         ⚠️ Use this ONLY for file CONTENT operations!
         For creating directories, use: shed_exec(zone, cmd="mkdir", args=["-p", "dir"])
@@ -5129,6 +5136,7 @@ class Tools:
         :param pattern: Regex pattern for "replace"
         :param regex_flags: Regex flags (i=ignore case, m=multiline, s=dotall)
         :param match_all: Replace all pattern matches (default: first only)
+        :param literal: Treat pattern as literal string instead of regex (default: False)
         :param overwrite: True=replace entire file content, False=patch at position (default: False).
                           Note: overwrite=False on existing file APPENDS/PATCHES, does NOT fail!
         :param safe: Lock file during edit (default: True). Set False for slightly better
@@ -5151,6 +5159,7 @@ class Tools:
                 zone=zone, path=path, content=content,
                 position=position, line=line, end_line=end_line,
                 pattern=pattern, regex_flags=regex_flags, match_all=match_all,
+                literal=literal,
                 overwrite=overwrite, safe=safe, group=group,
                 message=message, mode=mode,
                 allow_zone_in_path=allow_zone_in_path,
