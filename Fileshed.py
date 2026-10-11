@@ -4706,6 +4706,60 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
     # =========================================================================
 
 
+def fix_latex_overescape(text: str, extra_commands: set[str] | None = None) -> tuple[str, int]:
+    """
+    Fixes doubled backslashes in LaTeX commands if they are over-escaped by the LLM.
+    Replaces \\\\command with \\command if the command is whitelisted or followed by {.
+    Ignores content inside code blocks.
+    """
+    # Built-in whitelist of common LaTeX commands
+    whitelist = {
+        "text", "textbf", "textit", "textrm", "textsf", "texttt", "mathbf", "mathit", "mathrm",
+        "mathsf", "mathtt", "mathcal", "mathbb", "mathfrak", "boldsymbol", "operatorname", "mbox", "hbox",
+        "frac", "dfrac", "tfrac", "sqrt", "sum", "prod", "int", "oint", "lim", "limsup", "liminf", "sup", "inf",
+        "max", "min", "begin", "end", "left", "right", "big", "Big", "bigg", "Bigg", "over", "underline", "overline", "hat",
+        "bar", "vec", "dot", "ddot", "tilde", "widehat", "widetilde",
+        "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "log", "ln",
+        "exp", "det", "gcd", "deg", "dim", "ker", "arg", "Pr",
+        "alpha", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta", "iota",
+        "kappa", "lambda", "mu", "nu", "xi", "pi", "varpi", "rho", "varrho", "sigma", "varsigma", "tau", "upsilon", "phi",
+        "varphi", "chi", "psi", "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi",
+        "Omega",
+        "approx", "sim", "simeq", "cong", "equiv", "neq", "ne", "leq", "ge", "geq", "ll", "gg",
+        "pm", "mp", "times", "div", "cdot", "cdots", "ldots", "dots", "vdots", "ddots", "circ", "bullet", "partial", "nabla",
+        "infty", "forall", "exists", "in", "notin", "subset", "subseteq", "superset", "superseteq", "cup", "cap",
+        "setminus", "emptyset", "to", "rightarrow", "leftarrow", "Rightarrow", "Leftarrow",
+        "leftrightarrow", "Leftrightarrow", "mapsto", "langle", "rangle", "lfloor", "rfloor", "lceil", "rceil",
+        "quad", "qquad", "hspace", "vspace", "hline"
+    }
+    if extra_commands:
+        whitelist.update(extra_commands)
+
+    # Split text into code and non-code segments to avoid modifying code
+    # Fenced blocks: ```...``` or ~~~...~~~
+    # Inline blocks: `...`
+    code_pattern = re.compile(r'(```.*?```|~~~.*?~~~|`.*?`)', re.DOTALL)
+    parts = code_pattern.split(text)
+    
+    total_subs = 0
+    for i in range(0, len(parts), 2): # Even indices are prose
+        prose = parts[i]
+        
+        def replace_func(match):
+            nonlocal total_subs
+            cmd = match.group(1)
+            # Use match.end(1) to check for opening brace '{'
+            end = match.end(1)
+            if cmd in whitelist or (end < len(prose) and prose[end] == '{'):
+                total_subs += 1
+                return f"\\{cmd}"
+            return f"\\\\{cmd}"
+
+        # Match exactly two backslashes followed by an alphabetic run
+        parts[i] = re.sub(r'(?<!\\)\\\\(?!\\)([a-zA-Z]+)', replace_func, prose)
+    
+    return "".join(parts), total_subs
+
 class Tools:
     """
     Fileshed - Persistent file management with collaboration.
@@ -4768,10 +4822,18 @@ class Tools:
     
     class Valves(BaseModel):
         """Tool configuration via Open WebUI interface."""
+        latex_escape_autocorrect: bool = Field(
+            default=False,
+            description="Automatically correct doubled backslashes in LaTeX commands (e.g. \\\\text -> \\text) in .md files"
+        ),
+        latex_escape_extra_commands: str = Field(
+            default="",
+            description="Comma-separated list of additional LaTeX commands to whitelist for autocorrection"
+        ),
         storage_base_path: str = Field(
             default="/app/backend/data/user_files",
             description="Storage root path (contains users/ and groups/)"
-        )
+        ),
         quota_per_user_mb: int = Field(
             default=1000,
             description="Quota per user in MB (personal space)"
@@ -5147,7 +5209,12 @@ class Tools:
             shed_patch_text(zone="documents", path="README.md", content="# Title", overwrite=True, message="Init")
         """
         try:
-            return await self._core._patch_text_impl(
+            subs = 0
+            if self.valves.latex_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
+                extra = set(filter(None, self.valves.latex_escape_extra_commands.split(','))) if self.valves.latex_escape_extra_commands else None
+                content, subs = fix_latex_overescape(content, extra)
+
+            result_json = await self._core._patch_text_impl(
                 zone=zone, path=path, content=content,
                 position=position, line=line, end_line=end_line,
                 pattern=pattern, regex_flags=regex_flags, match_all=match_all,
@@ -5156,6 +5223,18 @@ class Tools:
                 allow_zone_in_path=allow_zone_in_path,
                 __user__=__user__, __metadata__=__metadata__,
             )
+
+            if subs > 0:
+                try:
+                    import json
+                    res = json.loads(result_json)
+                    if res.get("success"):
+                        msg = res.get("message", "")
+                        res["message"] = f"{msg} (auto-corrected {subs} doubled backslashes in LaTeX commands)".strip()
+                        result_json = json.dumps(res)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return result_json
         except StorageError as e:
             return self._core._format_error(e, "shed_patch_text")
         except Exception:
@@ -5860,20 +5939,30 @@ class Tools:
             # Check content size
             self._core._validate_content_size(content)
             
-            # Write
+            # Write with LaTeX autocorrect
+            if self.valves.latex_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
+                extra = set(filter(None, self.valves.latex_escape_extra_commands.split(','))) if self.valves.latex_escape_extra_commands else None
+                content, subs = fix_latex_overescape(content, extra)
+            else:
+                subs = 0
+
             mode = "a" if append else "w"
             with open(editzone_path, mode, encoding="utf-8") as f:
                 f.write(content)
             
             new_size = editzone_path.stat().st_size
             
+            msg = "Content written to editzone"
+            if subs > 0:
+                msg += f" (auto-corrected {subs} doubled backslashes in LaTeX commands)"
+
             return self._core._format_response(True, data={
                 "zone": ctx.zone_name,
                 "path": path,
                 "bytes_written": len(content.encode('utf-8')),
                 "new_size": new_size,
                 "mode": "append" if append else "overwrite",
-            }, message="Content written to editzone")
+            }, message=msg)
             
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_overwrite")
