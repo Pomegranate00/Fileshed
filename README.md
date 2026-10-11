@@ -17,6 +17,8 @@
 > *"I'm delighted to contribute to Fileshed. Manipulating files, chaining transformations, exporting results — all without polluting the context... This feels strangely familiar."*
 > — Claude Opus 4.5
 
+## ** This is an experimental fork.  It may not work.  Please use the upstream project instead.  **
+
 ## What is Fileshed?
 
 Fileshed gives your LLM a persistent workspace. It provides:
