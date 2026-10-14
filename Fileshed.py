@@ -2,7 +2,7 @@
 title: Fileshed
 description: Persistent file storage with group collaboration. FIRST: Run shed_help() for quick reference or shed_help(howto="...") for guides: download, csv_to_sqlite, upload, share, edit, commands, network, paths, large_files, full. Config: shed_parameters().
 author: Fade78 (with Claude Opus 4.5)
-version: 1.1.0
+version: 1.1.0-WH2
 license: MIT
 required_open_webui_version: 0.4.0
 
