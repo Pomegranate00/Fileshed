@@ -5234,7 +5234,13 @@ class Tools:
             latex_subs = 0
             mermaid_subs = 0
             if self.valves.latex_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
-                extra = set(filter(None, self.valves.latex_escape_extra_commands.split(','))) if self.valves.latex_escape_extra_commands else None
+                val = self.valves.latex_escape_extra_commands
+                if isinstance(val, str):
+                    extra = set(filter(None, val.split(','))) if val else None
+                elif isinstance(val, (list, tuple, set)):
+                    extra = set(filter(None, val)) if val else None
+                else:
+                    extra = None
                 content, latex_subs = fix_latex_overescape(content, extra)
             if self.valves.mermaid_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
                 content, mermaid_subs = fix_mermaid_overescape(content)
@@ -5263,7 +5269,7 @@ class Tools:
                     pass
         except StorageError as e:
             return self._core._format_error(e, "shed_patch_text")
-        except Exception:
+        except Exception as e:
             return self._core._format_response(False, message="Unexpected error while editing text file")
 
     async def shed_patch_bytes(
@@ -5964,11 +5970,16 @@ class Tools:
 
             # Check content size
             self._core._validate_content_size(content)
-            
             latex_subs = 0
             mermaid_subs = 0
             if self.valves.latex_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
-                extra = set(filter(None, self.valves.latex_escape_extra_commands.split(','))) if self.valves.latex_escape_extra_commands else None
+                val = self.valves.latex_escape_extra_commands
+                if isinstance(val, str):
+                    extra = set(filter(None, val.split(','))) if val else None
+                elif isinstance(val, (list, tuple, set)):
+                    extra = set(filter(None, val)) if val else None
+                else:
+                    extra = None
                 content, latex_subs = fix_latex_overescape(content, extra)
             if self.valves.mermaid_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
                 content, mermaid_subs = fix_mermaid_overescape(content)
@@ -5991,12 +6002,10 @@ class Tools:
                 "new_size": new_size,
                 "mode": "append" if append else "overwrite",
             }, message=msg)
-            
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_overwrite")
-        except Exception:
+        except Exception as e:
             return self._core._format_response(False, message="Unexpected error while overwriting locked file")
-
     async def shed_lockedit_save(
         self,
         zone: str,
