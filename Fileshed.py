@@ -4843,19 +4843,19 @@ class Tools:
         latex_escape_autocorrect: bool = Field(
             default=False,
             description="Automatically correct doubled backslashes in LaTeX commands (e.g. \\\\text -> \\text) in .md files"
-        ),
+        )
         latex_escape_extra_commands: str = Field(
             default="",
             description="Comma-separated list of additional LaTeX commands to whitelist for autocorrection"
-        ),
+        )
         mermaid_escape_autocorrect: bool = Field(
             default=False,
             description="Automatically correct over-escaped double quotes in Mermaid diagrams (e.g. \\\" -> \") in .md files"
-        ),
+        )
         storage_base_path: str = Field(
             default="/app/backend/data/user_files",
             description="Storage root path (contains users/ and groups/)"
-        ),
+        )
         quota_per_user_mb: int = Field(
             default=1000,
             description="Quota per user in MB (personal space)"
