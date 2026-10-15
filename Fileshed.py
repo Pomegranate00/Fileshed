@@ -4759,6 +4759,24 @@ def fix_latex_overescape(text: str, extra_commands: set[str] | None = None) -> t
         parts[i] = re.sub(r'(?<!\\)\\\\(?!\\)([a-zA-Z]+)', replace_func, prose)
     
     return "".join(parts), total_subs
+def fix_mermaid_overescape(text: str) -> tuple[str, int]:
+    """
+    Corrects over-escaped double quotes in Mermaid blocks.
+    Replaces \" with " only inside ```mermaid ... ``` blocks.
+    """
+    block_pattern = re.compile(r'(```mermaid.*?```)', re.DOTALL | re.IGNORECASE)
+    parts = block_pattern.split(text)
+    
+    total_subs = 0
+    for i in range(1, len(parts), 2):
+        block = parts[i]
+        def replace_quote(match):
+            nonlocal total_subs
+            total_subs += 1
+            return '"'
+        parts[i] = re.sub(r'(?<!\\)\\"', replace_quote, block)
+    
+    return "".join(parts), total_subs
 
 class Tools:
     """
@@ -4829,6 +4847,10 @@ class Tools:
         latex_escape_extra_commands: str = Field(
             default="",
             description="Comma-separated list of additional LaTeX commands to whitelist for autocorrection"
+        ),
+        mermaid_escape_autocorrect: bool = Field(
+            default=False,
+            description="Automatically correct over-escaped double quotes in Mermaid diagrams (e.g. \\\" -> \") in .md files"
         ),
         storage_base_path: str = Field(
             default="/app/backend/data/user_files",
@@ -5209,11 +5231,13 @@ class Tools:
             shed_patch_text(zone="documents", path="README.md", content="# Title", overwrite=True, message="Init")
         """
         try:
-            subs = 0
+            latex_subs = 0
+            mermaid_subs = 0
             if self.valves.latex_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
                 extra = set(filter(None, self.valves.latex_escape_extra_commands.split(','))) if self.valves.latex_escape_extra_commands else None
-                content, subs = fix_latex_overescape(content, extra)
-
+                content, latex_subs = fix_latex_overescape(content, extra)
+            if self.valves.mermaid_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
+                content, mermaid_subs = fix_mermaid_overescape(content)
             result_json = await self._core._patch_text_impl(
                 zone=zone, path=path, content=content,
                 position=position, line=line, end_line=end_line,
@@ -5224,17 +5248,19 @@ class Tools:
                 __user__=__user__, __metadata__=__metadata__,
             )
 
-            if subs > 0:
+            if latex_subs > 0 or mermaid_subs > 0:
                 try:
                     import json
                     res = json.loads(result_json)
                     if res.get("success"):
                         msg = res.get("message", "")
-                        res["message"] = f"{msg} (auto-corrected {subs} doubled backslashes in LaTeX commands)".strip()
+                        notes = []
+                        if latex_subs > 0: notes.append(f"auto-corrected {latex_subs} doubled backslashes in LaTeX commands")
+                        if mermaid_subs > 0: notes.append(f"auto-corrected {mermaid_subs} backslashes in Mermaid")
+                        res["message"] = f"{msg} ({', '.join(notes)})".strip()
                         result_json = json.dumps(res)
                 except (json.JSONDecodeError, TypeError):
                     pass
-            return result_json
         except StorageError as e:
             return self._core._format_error(e, "shed_patch_text")
         except Exception:
@@ -5939,13 +5965,13 @@ class Tools:
             # Check content size
             self._core._validate_content_size(content)
             
-            # Write with LaTeX autocorrect
+            latex_subs = 0
+            mermaid_subs = 0
             if self.valves.latex_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
                 extra = set(filter(None, self.valves.latex_escape_extra_commands.split(','))) if self.valves.latex_escape_extra_commands else None
-                content, subs = fix_latex_overescape(content, extra)
-            else:
-                subs = 0
-
+                content, latex_subs = fix_latex_overescape(content, extra)
+            if self.valves.mermaid_escape_autocorrect and (path.endswith('.md') or path.endswith('.markdown')):
+                content, mermaid_subs = fix_mermaid_overescape(content)
             mode = "a" if append else "w"
             with open(editzone_path, mode, encoding="utf-8") as f:
                 f.write(content)
@@ -5953,9 +5979,11 @@ class Tools:
             new_size = editzone_path.stat().st_size
             
             msg = "Content written to editzone"
-            if subs > 0:
-                msg += f" (auto-corrected {subs} doubled backslashes in LaTeX commands)"
-
+            if latex_subs > 0 or mermaid_subs > 0:
+                notes = []
+                if latex_subs > 0: notes.append(f"auto-corrected {latex_subs} doubled backslashes in LaTeX commands")
+                if mermaid_subs > 0: notes.append(f"auto-corrected {mermaid_subs} backslashes in Mermaid")
+                msg += f" ({', '.join(notes)})"
             return self._core._format_response(True, data={
                 "zone": ctx.zone_name,
                 "path": path,
